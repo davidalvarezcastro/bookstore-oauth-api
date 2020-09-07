@@ -4,31 +4,28 @@ import (
 	"strings"
 
 	token "github.com/davidalvarezcastro/bookstore-oauth-api/src/models/access_token"
+	"github.com/davidalvarezcastro/bookstore-oauth-api/src/repository/db"
+	"github.com/davidalvarezcastro/bookstore-oauth-api/src/repository/rest"
 	"github.com/davidalvarezcastro/bookstore-oauth-api/src/utils/errors"
 )
-
-// Repository temp
-type Repository interface {
-	GetByID(accessToken string) (*token.AccessToken, *errors.RestErr)
-	Create(token.AccessToken) *errors.RestErr
-	UpdateExpirationTime(token.AccessToken) *errors.RestErr
-}
 
 // Service defining all the functions for access_token service
 type Service interface {
 	GetByID(string) (*token.AccessToken, *errors.RestErr)
-	Create(token.AccessToken) *errors.RestErr
+	Create(token.AccessTokenRequest) (*token.AccessToken, *errors.RestErr)
 	UpdateExpirationTime(token.AccessToken) *errors.RestErr
 }
 
 type service struct {
-	restUsersRepo Repository
+	restUsersRepo rest.UserRepository
+	dbRepo        db.Repository
 }
 
 // NewService return a Service interface
-func NewService(repo Repository) Service {
+func NewService(usersRepo rest.UserRepository, dbRepo db.Repository) Service {
 	return &service{
-		restUsersRepo: repo,
+		restUsersRepo: usersRepo,
+		dbRepo:        dbRepo,
 	}
 }
 
@@ -39,7 +36,7 @@ func (s *service) GetByID(accessTokenID string) (*token.AccessToken, *errors.Res
 		return nil, errors.NewBadRequestError("invalid access token")
 	}
 
-	accessToken, err := s.restUsersRepo.GetByID(accessTokenID)
+	accessToken, err := s.dbRepo.GetByID(accessTokenID)
 	if err != nil {
 		return nil, err
 	}
@@ -48,12 +45,28 @@ func (s *service) GetByID(accessTokenID string) (*token.AccessToken, *errors.Res
 }
 
 // Create creates a new access token
-func (s *service) Create(at token.AccessToken) *errors.RestErr {
-	if err := at.Validate(); err != nil {
-		return err
+func (s *service) Create(request token.AccessTokenRequest) (*token.AccessToken, *errors.RestErr) {
+	if err := request.Validate(); err != nil {
+		return nil, err
 	}
 
-	return s.restUsersRepo.Create(at)
+	//TODO: Support both grant types: client_credentials and password
+
+	// Authenticate the user against the Users API:
+	user, err := s.restUsersRepo.LoginUser(request.Username, request.Password)
+	if err != nil {
+		return nil, err
+	}
+
+	// Generate a new access token:
+	at := token.GetNewAccessToken(user.ID)
+	at.Generate()
+
+	// Save the new access token in Cassandra:
+	if err := s.dbRepo.Create(at); err != nil {
+		return nil, err
+	}
+	return &at, nil
 }
 
 // UpdateExpirationTime updated expiration time
@@ -62,5 +75,5 @@ func (s *service) UpdateExpirationTime(at token.AccessToken) *errors.RestErr {
 		return err
 	}
 
-	return s.restUsersRepo.UpdateExpirationTime(at)
+	return s.dbRepo.UpdateExpirationTime(at)
 }

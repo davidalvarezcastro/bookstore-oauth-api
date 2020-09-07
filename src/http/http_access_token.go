@@ -20,8 +20,8 @@ type accessTokenHandler struct {
 	service token.Service
 }
 
-// NewHandler handles oauth api requests
-func NewHandler(service token.Service) AccessTokenHandler {
+// NewAccessTokenHandler handles oauth api requests
+func NewAccessTokenHandler(service token.Service) AccessTokenHandler {
 	return &accessTokenHandler{
 		service: service,
 	}
@@ -37,17 +37,18 @@ func (h *accessTokenHandler) GetByID(c *gin.Context) {
 }
 
 func (h *accessTokenHandler) Create(c *gin.Context) {
-	var at tokenM.AccessToken
-	if err := c.ShouldBindJSON(&at); err != nil {
+	var request tokenM.AccessTokenRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
 		restErr := errors.NewBadRequestError("invalid json body")
 		c.JSON(restErr.Status, restErr)
 		return
 	}
 
-	if err := h.service.Create(at); err != nil {
+	accessToken, err := h.service.Create(request)
+	if err != nil {
 		c.JSON(err.Status, err)
 		return
 	}
 
-	c.JSON(http.StatusCreated, at)
+	c.JSON(http.StatusCreated, accessToken)
 }
